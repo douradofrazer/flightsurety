@@ -16,6 +16,9 @@ contract FlightSuretyData {
     // address payable public dataContractAddress;
     mapping(address => uint256) private authorizedContracts;
 
+    uint8 private constant STATUS_UNKNOWN = 0;
+    uint8 private constant STATUS_DELAYED = 1;
+    uint8 private constant STATUS_ON_TIME = 2;
 
     uint256 public constant INSURANCE_PRICE_LIMIT = 1 ether;
     uint256 public constant MINIMUM_FUNDS = 10 ether;
@@ -48,9 +51,13 @@ contract FlightSuretyData {
     struct Insurance {
         bytes32 flightCode;
         uint256 amount;
+        address passenger;
+        uint256 multiplier;
+        bool isCredited;
     }
 
-    mapping(address => Insurance []) private passengerInsurance;
+    mapping(bytes32 => Insurance []) private passengerInsuranceByFlight;
+    mapping (address => uint) public pendingPayments;
 
 
     /********************************************************************************************/
@@ -59,7 +66,10 @@ contract FlightSuretyData {
      event AirlineRegistrationQueued(string name, address addr, uint256 votes);
      event AirlineRegistered(string name, address addr);
      event ContractAuthorized(address addr);
-     event InsurancePurchased(address airline, string flight, uint256 amount);
+     event InsurancePurchased(address airline, string flight, uint256 amount, address passenger);
+     event InsureeCredited(address airline, string flight);
+     event AccountWithdrawn(address passenger, uint256 amount);
+     event FlightStatusUpdated(address airline, string flight, uint256 timestamp, uint8 status);
 
 
     /**
@@ -118,6 +128,11 @@ contract FlightSuretyData {
     /*                                       UTILITY FUNCTIONS                                  */
     /********************************************************************************************/
 
+    function getBalance() public view returns(uint256)
+    {
+        return address(this).balance;
+    }
+
     /**
     * @dev Get operating status of contract
     *
@@ -142,6 +157,11 @@ contract FlightSuretyData {
     function authorizeContract(address appContract) external requireIsOperational requireContractOwner {
         authorizedContracts[appContract] = 1;
         emit ContractAuthorized(appContract);
+    }
+
+
+    function isFlightOnTime(address airline, string calldata flight, uint256 timestamp) external view returns(bool) {
+        return flights[getFlightKey(airline, flight, timestamp)].status > STATUS_DELAYED;
     }
 
 
@@ -213,36 +233,90 @@ contract FlightSuretyData {
     * Ref : https://programtheblockchain.com/posts/2017/12/15/writing-a-contract-that-handles-ether/
     */   
     function buy(address airline, string memory flight, uint256 timestamp) external payable
-    requireIsOperational
-    requireAuthorizedContract 
+    requireIsOperational 
     {
         require(msg.sender == tx.origin, 'Contracts not allowed.');
         require(msg.value > 0 , 'You need to pay a minium to purchase a flight insurance.');
 
         bytes32 flightCode = getFlightKey(airline, flight, timestamp);
 
-        uint256 amount = msg.value;
-        passengerInsurance[msg.sender].push(Insurance(flightCode, amount));
+        uint256 multiplier = uint(3).div(2);
 
-        emit InsurancePurchased(airline, flight, amount);
+        uint256 amount = msg.value;
+        passengerInsuranceByFlight[flightCode].push(Insurance({
+            flightCode: flightCode, 
+            amount: amount, 
+            passenger: msg.sender,
+            multiplier: multiplier,
+            isCredited: false
+            }));
+
+        emit InsurancePurchased(airline, flight, amount, msg.sender);
     }
 
     /**
      *  @dev Credits payouts to insurees
     */
-    function creditInsurees() external pure
+    function creditInsurees(address airline, string memory flight, uint256 timestamp) internal
+    requireIsOperational
+    requireAuthorizedContract 
     {
 
+     bytes32 flightCode = getFlightKey(airline, flight, timestamp);   
+
+    // using a for loop here on the assumption that this list is likely going to be a small one
+    for (uint i = 0; i < passengerInsuranceByFlight[flightCode].length; i++) {
+      Insurance memory insurance = passengerInsuranceByFlight[flightCode][i];
+
+      if (insurance.isCredited == false) {
+        insurance.isCredited = true;
+        uint256 amount = insurance.amount.mul(insurance.multiplier).div(100);
+        pendingPayments[insurance.passenger] += amount;
+      }
     }
+
+    emit InsureeCredited(airline, flight);
+    }
+
+
+    function processFlightStatus(address airline, string calldata flight, uint256 timestamp, uint8 status) external
+    requireIsOperational 
+    requireAuthorizedContract 
+    {
+
+    bytes32 flightKey = getFlightKey(airline, flight, timestamp);    
+    
+    if (flights[flightKey].status == STATUS_UNKNOWN) {
+      flights[flightKey].status = status;
+      if(status == STATUS_DELAYED) {
+        creditInsurees(airline, flight, timestamp);
+      }
+    }
+
+    emit FlightStatusUpdated(airline, flight, timestamp, status);
+  }
+
     
 
     /**
      *  @dev Transfers eligible payout funds to insuree
      *
     */
-    function pay() external pure
+    function pay(address passenger) external 
+    requireIsOperational
     {
+    require(pendingPayments[passenger] > 0, "No fund available for withdrawal");
 
+    // Effects
+    uint256 amount = pendingPayments[passenger];
+
+    require(address(this).balance > amount, "The contract does not have enough funds to pay the credit");
+
+    pendingPayments[passenger] = 0;
+
+    payable(passenger).transfer(amount);
+
+    emit AccountWithdrawn(passenger, amount);
     }
 
    /**
