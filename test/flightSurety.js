@@ -12,6 +12,7 @@ let insuranceAmount;
 
 const TIMESTAMP = Math.floor(Date.now() / 1000);
 const FLIGHT = 'FJ';
+const STATUS_DELAYED_AIRLINE = 20;
 
 contract('Flight Surety FlightSurety', async (accounts) => {
     acc = accounts;
@@ -19,7 +20,6 @@ contract('Flight Surety FlightSurety', async (accounts) => {
 });
 
 before('setup contract', async () => {
-    // await config.flightSuretyData.authorizeCaller(config.flightSuretyApp.address);
     appData = await FlightSuretyData.new();
     app = await FlightSuretyApp.new(appData.address);
     insuranceAmount = web3.utils.toWei("1", "ether");
@@ -157,7 +157,7 @@ it('Customer should be able to withdraw insurance payout', async () => {
         eventFlightStatusUpdatedEmitted = true
     });
 
-    await appData.processFlightStatus(config.firstAirline, FLIGHT, TIMESTAMP, 1, {from: config.owner});
+    await appData.processFlightStatus(config.firstAirline, FLIGHT, TIMESTAMP, STATUS_DELAYED_AIRLINE, {from: config.owner});
 
     // Withdraw the insurance payout by customer
     let eventAccountWithdrawnEmitted = false;

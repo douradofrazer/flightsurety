@@ -17,8 +17,11 @@ contract FlightSuretyData {
     mapping(address => uint256) private authorizedContracts;
 
     uint8 private constant STATUS_UNKNOWN = 0;
-    uint8 private constant STATUS_DELAYED = 1;
-    uint8 private constant STATUS_ON_TIME = 2;
+    uint8 private constant STATUS_ON_TIME = 10;
+    uint8 private constant STATUS_DELAYED_AIRLINE = 20;
+    uint8 private constant STATUS_DELAYED_WEATHER = 30;
+    uint8 private constant STATUSE_DELAYED_TECHNICAL = 40;
+    uint8 private constant STATUSE_DELAYED_OTHER = 50;
 
     uint256 public constant INSURANCE_PRICE_LIMIT = 1 ether;
     uint256 public constant MINIMUM_FUNDS = 10 ether;
@@ -161,7 +164,7 @@ contract FlightSuretyData {
 
 
     function isFlightOnTime(address airline, string calldata flight, uint256 timestamp) external view returns(bool) {
-        return flights[getFlightKey(airline, flight, timestamp)].status > STATUS_DELAYED;
+        return flights[getFlightKey(airline, flight, timestamp)].status == STATUS_ON_TIME;
     }
 
 
@@ -237,6 +240,7 @@ contract FlightSuretyData {
     {
         require(msg.sender == tx.origin, 'Contracts not allowed.');
         require(msg.value > 0 , 'You need to pay a minium to purchase a flight insurance.');
+        require(msg.value <= INSURANCE_PRICE_LIMIT, 'You only pay a max of 1 ether for flight insurance.');
 
         bytes32 flightCode = getFlightKey(airline, flight, timestamp);
 
@@ -279,6 +283,9 @@ contract FlightSuretyData {
     }
 
 
+    /**
+     *  @dev process flight status
+    */
     function processFlightStatus(address airline, string calldata flight, uint256 timestamp, uint8 status) external
     requireIsOperational 
     requireAuthorizedContract 
@@ -288,13 +295,13 @@ contract FlightSuretyData {
     
     if (flights[flightKey].status == STATUS_UNKNOWN) {
       flights[flightKey].status = status;
-      if(status == STATUS_DELAYED) {
+      if(status == STATUS_DELAYED_AIRLINE) {
         creditInsurees(airline, flight, timestamp);
       }
     }
 
     emit FlightStatusUpdated(airline, flight, timestamp, status);
-  }
+    }
 
     
 
