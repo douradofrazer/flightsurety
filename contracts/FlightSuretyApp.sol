@@ -8,11 +8,16 @@ pragma solidity ^0.8.11;
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
 
-interface FSyData {
+interface FSD {
     function isOperational() external view returns(bool);
     function isActive ( address airline) external view returns(bool);
-    function registerAirline(address airlineAddress, string calldata name) external returns(bool);
+    function airlinesCount() external view returns(uint8);
+    function registerAirline(address airlineAddress, string calldata name) external returns(bool success, uint8 votes);
+    function isAirlineRegistered(address airline) external returns(bool);
+    function isAirlineFunded(address airline) external returns(bool);
+    function registerFlight(address airline, string memory flight, uint256 timestamp, string memory from, string memory to) external;
     function creditInsurees (string calldata flightCode) external;
+    function processFlightStatus(address airline, string calldata flight, uint256 timestamp, uint8 status) external;
 }
 
 /************************************************** */
@@ -25,26 +30,35 @@ contract FlightSuretyApp {
     /*                                       DATA VARIABLES                                     */
     /********************************************************************************************/
 
-    FSyData flightSuretydata;
+    FSD flightSuretydata;
 
     // Flight status codees
-    uint8 private constant STATUS_CODE_UNKNOWN = 0;
-    uint8 private constant STATUS_CODE_ON_TIME = 10;
-    uint8 private constant STATUS_CODE_LATE_AIRLINE = 20;
-    uint8 private constant STATUS_CODE_LATE_WEATHER = 30;
-    uint8 private constant STATUS_CODE_LATE_TECHNICAL = 40;
-    uint8 private constant STATUS_CODE_LATE_OTHER = 50;
+    uint8 private constant STATUS_UNKNOWN = 0;
+    uint8 private constant STATUS_ON_TIME = 10;
+    uint8 private constant STATUS_DELAYED_AIRLINE = 20;
+    uint8 private constant STATUS_DELAYED_WEATHER = 30;
+    uint8 private constant STATUSE_DELAYED_TECHNICAL = 40;
+    uint8 private constant STATUSE_DELAYED_OTHER = 50;
+
+    uint8 private constant MULTIPARTY_CONSENSUS_MIN = 4;
 
     address private contractOwner;          // Account used to deploy contract
 
-    struct Flight {
-        bool isRegistered;
-        uint8 statusCode;
-        uint256 updatedTimestamp;        
-        address airline;
-    }
-    mapping(bytes32 => Flight) private flights;
+    mapping(address => address []) registerAirlineMultiConsensus;
 
+    /********************************************************************************************/
+    /*                                       CONSTRUCTOR                                        */
+    /********************************************************************************************/
+
+    /**
+    * @dev Contract constructor
+    *
+    */
+    constructor(address dataContract) 
+    {
+        contractOwner = msg.sender;
+        flightSuretydata = FSD(dataContract);
+    }
  
     /********************************************************************************************/
     /*                                       FUNCTION MODIFIERS                                 */
@@ -74,28 +88,23 @@ contract FlightSuretyApp {
         _;
     }
 
-    /********************************************************************************************/
-    /*                                       CONSTRUCTOR                                        */
-    /********************************************************************************************/
-
-    /**
-    * @dev Contract constructor
-    *
-    */
-    constructor(address dataContract) 
+    modifier requireRegisteredAirline()
     {
-        contractOwner = msg.sender;
-        flightSuretydata = FSyData(dataContract);
+        require(flightSuretydata.isAirlineRegistered(msg.sender) == true, "Caller airline cannot perfomr this operation as it is not registered.");
+        _;
+    }
+
+    modifier requireFundedAirline()
+    {
+        require(flightSuretydata.isAirlineFunded(msg.sender) == true, "Caller airline cannot perfomr this operation as it is not funded.");
+        _;
     }
 
     /********************************************************************************************/
     /*                                       UTILITY FUNCTIONS                                  */
     /********************************************************************************************/
 
-    function isOperational() 
-                            public 
-                            view 
-                            returns(bool) 
+    function isOperational() public view returns(bool) 
     {
         return flightSuretydata.isOperational();  // Modify to call data contract's status
     }
@@ -109,44 +118,58 @@ contract FlightSuretyApp {
     * @dev Add an airline to the registration queue
     *
     */   
-    function registerAirline
-                            (   
-                            )
-                            external
-                            pure
-                            returns(bool success, uint256 votes)
+    function registerAirline ( address airline, string memory name ) external 
+    requireIsOperational
+    requireRegisteredAirline
+    requireFundedAirline 
+    returns(bool success, uint256 votes) 
     {
-        return (success, 0);
+
+        if(flightSuretydata.airlinesCount() < MULTIPARTY_CONSENSUS_MIN ) {
+            return flightSuretydata.registerAirline(airline, name);
+        } else {
+            require(isDuplicateVoter(airline) == false, string(abi.encodePacked('Airline ', name, ' has already been voted to register by ', airline)));
+            registerAirlineMultiConsensus[airline].push(msg.sender);
+            return flightSuretydata.registerAirline(airline, name);
+        }
+
     }
 
+    function isDuplicateVoter(address airline) private view returns(bool)
+    {
+
+        bool isDuplicate = false;
+
+        for(uint8 i = 0; i<registerAirlineMultiConsensus[airline].length; i++){
+            if(registerAirlineMultiConsensus[airline][i] == msg.sender){
+                isDuplicate = true;
+            }
+        }
+
+        return isDuplicate;
+    }
 
    /**
     * @dev Register a future flight for insuring.
     *
     */  
-    function registerFlight
-                                (
-                                )
-                                external
-                                pure
+    function registerFlight (string memory flight, uint256 timestamp, string memory from, string memory to) external
+    requireIsOperational
+    requireRegisteredAirline
+    requireFundedAirline 
     {
-
+        // the caller will be the airline hence we pass the sender address
+        flightSuretydata.registerFlight(msg.sender, flight, timestamp, from, to);
     }
     
    /**
     * @dev Called after oracle has updated flight status
     *
     */  
-    function processFlightStatus
-                                (
-                                    address airline,
-                                    string memory flight,
-                                    uint256 timestamp,
-                                    uint8 statusCode
-                                )
-                                internal
-                                pure
+    function processFlightStatus(address airline, string memory flight, uint256 timestamp, uint8 statusCode) internal
+    requireIsOperational
     {
+        flightSuretydata.processFlightStatus(airline, flight, timestamp, statusCode);
     }
 
 

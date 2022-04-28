@@ -1,3 +1,5 @@
+const assert = require('chai').assert;
+const expect = require('chai').expect;
 const Test = require('./config/testConfig.js');
 const BigNumber = require('bignumber.js');
 
@@ -107,15 +109,18 @@ let newAirline = acc[2];
 // Ideally you should pass `{from: app.address}` but truffle does not recoginize the sender address
 // as it is not part of the accounts it provides
 // Ref : https://ethereum.stackexchange.com/questions/56593/error-sender-account-not-recognized-when-calling-transferfrom-on-an-erc721
-await appData.registerAirline(newAirline, FLIGHT, {from: config.owner});
+try{
+    await app.registerAirline(newAirline, FLIGHT, {from: config.owner}); // owner in this case is also the default airline registered
+} catch(e){
+    expect(e.message).to.have.string('Caller airline cannot perfomr this operation as it is not funded..')
+}
 
-let result = await appData.isAirline.call(newAirline); 
+let result = await appData.isAirlineRegistered.call(newAirline); 
 
 // ASSERT
 assert.equal(result, false, "Airline should not be able to register another airline if it hasn't provided funding");
 
 });
-
 
 it('Customer should be able to buy insurance', async () => {
 
@@ -174,3 +179,44 @@ it('Customer should be able to withdraw insurance payout', async () => {
     assert.equal(eventAccountWithdrawnEmitted, true, "AccountWithdrawn was not emitted.");
     assert.equal(currentCustomerBalance > customerBalanceAfterBuy, true, "Balance is not greater than after purchase." )
 });
+
+it('(airline) can be funded', async () => {
+
+    let defaultAirline = config.owner;
+
+    let eventEmitted = false;
+
+    await appData.contract.events.AirlineFunded((err, res) => {
+        eventEmitted = true
+    });
+
+    await appData.fundAirline(defaultAirline, {from : config.owner, value: web3.utils.toWei('10', 'ether')});
+
+    let isFunded = await appData.isAirlineFunded(defaultAirline);
+
+    let appDataBalance = await web3.eth.getBalance(appData.address);
+    let minBalanceAfterFunding = await  web3.utils.toWei('10', 'ether');
+
+    assert.equal(isFunded, true, 'Airline was not funded.');
+    assert.equal(eventEmitted, true, "AirlineFunded was not emmited.");
+    assert.equal(appDataBalance >= minBalanceAfterFunding, true, "Contract has the funded amount")
+});
+
+
+it('(airline) can register a flight', async () => {
+
+    let defaultAirline = config.owner;
+
+    let eventEmitted = false;
+
+    await appData.contract.events.AirlineFunded((err, res) => {
+        eventEmitted = true
+    });
+
+    await appData.registerFlight(defaultAirline, 'F1', TIMESTAMP, 'NYC', 'AMS');
+
+    let isFlightRegistered = await appData.isFlightRegistered(defaultAirline, 'F1', TIMESTAMP);
+
+    assert.equal(eventEmitted, true, "FlightRegistered was not emmited.");
+    assert.equal(isFlightRegistered, true, 'Flight was not registered.')
+})

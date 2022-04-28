@@ -34,7 +34,7 @@ contract FlightSuretyData {
         string name;
         address account;
         bool isRegistered;
-        uint256 funded;
+        bool isFunded;
         uint8 voted;
     }
 
@@ -47,6 +47,7 @@ contract FlightSuretyData {
         string to;
         uint8 status; // 0 or 1 (0 : in-flight, 1:landed)
         uint256 timestamp;
+        bool isRegistered;
     }
 
     mapping(bytes32 => Flight) private flights;
@@ -68,11 +69,13 @@ contract FlightSuretyData {
     /********************************************************************************************/
      event AirlineRegistrationQueued(string name, address addr, uint256 votes);
      event AirlineRegistered(string name, address addr);
+     event FlightRegistered(bytes32 flightKey, address airline, string flight, string from, string to, uint256 timestamp);
      event ContractAuthorized(address addr);
      event InsurancePurchased(address airline, string flight, uint256 amount, address passenger);
      event InsureeCredited(address airline, string flight);
      event AccountWithdrawn(address passenger, uint256 amount);
      event FlightStatusUpdated(address airline, string flight, uint256 timestamp, uint8 status);
+     event AirlineFunded(string name, address airline);
 
 
     /**
@@ -86,7 +89,7 @@ contract FlightSuretyData {
                                         name: "FJDAirlines",
                                         account: msg.sender,
                                         isRegistered: true,
-                                        funded: 0,
+                                        isFunded: false,
                                         voted: 0
                                     });
         airlinesCount++;
@@ -146,7 +149,6 @@ contract FlightSuretyData {
         return operational;
     }
 
-
     /**
     * @dev Sets contract operations on/off
     *
@@ -162,19 +164,26 @@ contract FlightSuretyData {
         emit ContractAuthorized(appContract);
     }
 
-
     function isFlightOnTime(address airline, string calldata flight, uint256 timestamp) external view returns(bool) {
         return flights[getFlightKey(airline, flight, timestamp)].status == STATUS_ON_TIME;
     }
-
 
     /**
     * @dev Check if the address is a registered airline
     *
     * @return A bool confirming whether or not the address is a registered airline
     */
-    function isAirline(address airline) external view returns(bool) {
+    function isAirlineRegistered(address airline) external view returns(bool) {
         return airlines[airline].isRegistered;
+    }
+
+    function isAirlineFunded(address airline) external view returns (bool) {
+        return airlines[airline].isFunded;
+    }
+
+    function isFlightRegistered(address airline, string memory flight, uint256 timestamp) external view returns (bool) {
+        bytes32 flightCode = getFlightKey(airline, flight, timestamp);
+        return flights[flightCode].isRegistered;
     }
 
     /********************************************************************************************/
@@ -190,6 +199,7 @@ contract FlightSuretyData {
     external 
     requireIsOperational
     requireAuthorizedContract
+    returns(bool success, uint8 votes)
     {
         require(airlineAddress != address(0), "'airline' must be a valid address.");
         require(!airlines[airlineAddress].isRegistered, "Airline is already registered.");
@@ -199,17 +209,19 @@ contract FlightSuretyData {
             airlines[airlineAddress] = Airline({
                                             name: airlineName,
                                             account: airlineAddress,
-                                            isRegistered: false,
-                                            funded: 0,
+                                            isRegistered: true,
+                                            isFunded: false,
                                             voted: 0
                                         });
             airlinesCount++;
+            return (true, 0);
         } else {
-            queueAirlineRegistration(airlineAddress, airlineName);
+            return queueAirlineRegistration(airlineAddress, airlineName);
         }
     }
 
-    function queueAirlineRegistration (address airlineAddress, string memory airlineName) internal requireIsOperational {
+    // only to be used within the contract
+    function queueAirlineRegistration (address airlineAddress, string memory airlineName) private returns(bool, uint8) {
         
         // check if the voter already casted his vote, if not proceed to add the vote
         airlines[airlineAddress].voted++;
@@ -217,17 +229,58 @@ contract FlightSuretyData {
         if (airlines[airlineAddress].voted >= airlinesCount.div(2)) {
             airlines[airlineAddress].name = airlineName;
             airlines[airlineAddress].account = airlineAddress;
-            airlines[airlineAddress].isRegistered = false;
-            airlines[airlineAddress].funded = 0;
+            airlines[airlineAddress].isRegistered = true;
+            airlines[airlineAddress].isFunded = false;
             airlinesCount++;
 
             emit AirlineRegistered(airlineName, airlineAddress);
+
+            return (true, airlines[airlineAddress].voted);
             
         } else {
 
             emit AirlineRegistrationQueued(airlineName, airlineAddress, airlines[airlineAddress].voted);
 
+            return (false, airlines[airlineAddress].voted);
+
         }
+    }
+
+    /**
+    * @dev Submit funding for airline
+    */   
+    function fundAirline(address airline) external payable 
+    requireIsOperational 
+    requireAuthorizedContract 
+    {
+        require(msg.value == 10 ether, 'A funding of 10 ether is required.');
+        airlines[airline].isFunded = true;
+        emit AirlineFunded(airlines[airline].name, airline);
+    }
+
+
+    /**
+    * @dev Register a flight
+    */   
+    function registerFlight(address airline, string memory flight, uint256 timestamp, string memory from, string memory to) external 
+    requireIsOperational
+    requireAuthorizedContract
+    {
+        bytes32 flightCode = getFlightKey(airline, flight, timestamp);
+
+        require(!flights[flightCode].isRegistered, 'Flight has already been registered.');
+
+        flights[flightCode] = Flight({
+            airline: airline,
+            name : flight,
+            from : from, 
+            to : to,
+            status : STATUS_UNKNOWN,
+            timestamp : timestamp,
+            isRegistered: true
+        });
+
+        emit FlightRegistered(flightCode, airline, flight, from, to, timestamp);
     }
 
 
