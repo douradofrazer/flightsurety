@@ -25,7 +25,7 @@ contract('Oracles', async (accounts) => {
 
     appData = await FlightSuretyData.new();
     app = await FlightSuretyApp.new(appData.address);
-
+    await appData.authorizeContract(app.address, {from: config.owner});
   });
 
 
@@ -64,7 +64,7 @@ contract('Oracles', async (accounts) => {
 
         try {
           // Submit a response...it will only be accepted if there is an Index match
-          await app.submitOracleResponse(oracleIndexes[idx], config.firstAirline, flight, timestamp, STATUS_CODE_ON_TIME, { from: accounts[a] });
+          await app.submitOracleResponse(oracleIndexes[idx], config.firstAirline, flight, timestamp, STATUS_ON_TIME, { from: accounts[a] });
 
         }
         catch(e) {
