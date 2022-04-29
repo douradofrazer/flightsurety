@@ -199,7 +199,7 @@ contract FlightSuretyData {
     external 
     requireIsOperational
     requireAuthorizedContract
-    returns(bool success, uint8 votes)
+    returns(bool success, uint256 votes)
     {
         require(airlineAddress != address(0), "'airline' must be a valid address.");
         require(!airlines[airlineAddress].isRegistered, "Airline is already registered.");
@@ -214,14 +214,16 @@ contract FlightSuretyData {
                                             voted: 0
                                         });
             airlinesCount++;
-            return (true, 0);
+            (success, votes) = (true, 0);
         } else {
-            return queueAirlineRegistration(airlineAddress, airlineName);
+            (success, votes) = queueAirlineRegistration(airlineAddress, airlineName);
         }
+
+        return (success, votes);
     }
 
     // only to be used within the contract
-    function queueAirlineRegistration (address airlineAddress, string memory airlineName) private returns(bool, uint8) {
+    function queueAirlineRegistration (address airlineAddress, string memory airlineName) private returns(bool success, uint256 votes) {
         
         // check if the voter already casted his vote, if not proceed to add the vote
         airlines[airlineAddress].voted++;
@@ -235,25 +237,24 @@ contract FlightSuretyData {
 
             emit AirlineRegistered(airlineName, airlineAddress);
 
-            return (true, airlines[airlineAddress].voted);
-            
+            (success, votes) = (true, airlines[airlineAddress].voted);
         } else {
 
             emit AirlineRegistrationQueued(airlineName, airlineAddress, airlines[airlineAddress].voted);
 
-            return (false, airlines[airlineAddress].voted);
-
+            (success, votes) = (false, airlines[airlineAddress].voted);
         }
+
+        return (success, votes);
     }
 
     /**
     * @dev Submit funding for airline
     */   
-    function fundAirline(address airline) external payable 
+    function fundAirline(address airline) external  
     requireIsOperational 
     requireAuthorizedContract 
     {
-        require(msg.value == 10 ether, 'A funding of 10 ether is required.');
         airlines[airline].isFunded = true;
         emit AirlineFunded(airlines[airline].name, airline);
     }
@@ -296,6 +297,8 @@ contract FlightSuretyData {
         require(msg.value <= INSURANCE_PRICE_LIMIT, 'You only pay a max of 1 ether for flight insurance.');
 
         bytes32 flightCode = getFlightKey(airline, flight, timestamp);
+
+        require(flights[flightCode].isRegistered == true, 'The flight for which insurance is to be purchased is not registered.');
 
         uint256 multiplier = uint(3).div(2);
 

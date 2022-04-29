@@ -12,8 +12,9 @@ interface FSD {
     function isOperational() external view returns(bool);
     function isActive ( address airline) external view returns(bool);
     function airlinesCount() external view returns(uint8);
-    function registerAirline(address airlineAddress, string calldata name) external returns(bool success, uint8 votes);
+    function registerAirline(address airlineAddress, string calldata name) external returns(bool success, uint256 votes);
     function isAirlineRegistered(address airline) external returns(bool);
+    function fundAirline(address airline) external payable;
     function isAirlineFunded(address airline) external returns(bool);
     function registerFlight(address airline, string memory flight, uint256 timestamp, string memory from, string memory to) external;
     function creditInsurees (string calldata flightCode) external;
@@ -118,7 +119,7 @@ contract FlightSuretyApp {
     * @dev Add an airline to the registration queue
     *
     */   
-    function registerAirline ( address airline, string memory name ) external 
+    function registerAirline ( address airline, string memory name ) public 
     requireIsOperational
     requireRegisteredAirline
     requireFundedAirline 
@@ -126,13 +127,14 @@ contract FlightSuretyApp {
     {
 
         if(flightSuretydata.airlinesCount() < MULTIPARTY_CONSENSUS_MIN ) {
-            return flightSuretydata.registerAirline(airline, name);
+            (success, votes) = flightSuretydata.registerAirline(airline, name);
         } else {
             require(isDuplicateVoter(airline) == false, string(abi.encodePacked('Airline ', name, ' has already been voted to register by ', airline)));
             registerAirlineMultiConsensus[airline].push(msg.sender);
-            return flightSuretydata.registerAirline(airline, name);
+            (success, votes) = flightSuretydata.registerAirline(airline, name);
         }
 
+        return (success, votes);
     }
 
     function isDuplicateVoter(address airline) private view returns(bool)
@@ -149,11 +151,19 @@ contract FlightSuretyApp {
         return isDuplicate;
     }
 
+    function fundAirline(address airline) public payable{
+        require(msg.value == 10 ether, 'A funding of 10 ether is required.');
+
+        payable(address(flightSuretydata)).transfer(msg.value);
+        
+        flightSuretydata.fundAirline(airline);
+    }
+
    /**
     * @dev Register a future flight for insuring.
     *
     */  
-    function registerFlight (string memory flight, uint256 timestamp, string memory from, string memory to) external
+    function registerFlight (string memory flight, uint256 timestamp, string memory from, string memory to) public
     requireIsOperational
     requireRegisteredAirline
     requireFundedAirline 

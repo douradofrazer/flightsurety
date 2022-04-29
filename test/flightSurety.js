@@ -2,6 +2,8 @@ const assert = require('chai').assert;
 const expect = require('chai').expect;
 const Test = require('./config/testConfig.js');
 const BigNumber = require('bignumber.js');
+const { call } = require('file-loader');
+const { Assertion } = require('chai');
 
 const FlightSuretyApp = artifacts.require("FlightSuretyApp");
 const FlightSuretyData = artifacts.require("FlightSuretyData");
@@ -45,7 +47,7 @@ it(`(multiparty) can block access to setOperatingStatus() for non-Contract Owner
     let accessDenied = false;
     try 
     {
-        await appData.setOperatingStatus(false, { from: config.testAddresses[2] });
+        await appData.setOperatingStatus(false, { from: acc[3] });
     }
     catch(e) {
         accessDenied = true;
@@ -73,10 +75,12 @@ it(`(multiparty) can block access to functions using requireIsOperational when o
 
     await appData.setOperatingStatus(false);
 
+    let newAirline = acc[2];
+
     let reverted = false;
     try 
     {
-        await app.setTestingMode(true);
+        await app.registerAirline(newAirline, 'Yellow Bird', {from: config.owner});
     }
     catch(e) {
         reverted = true;
@@ -122,6 +126,69 @@ assert.equal(result, false, "Airline should not be able to register another airl
 
 });
 
+it('(airline) can be funded', async () => {
+
+    let defaultAirline = config.owner;
+
+    let eventEmitted = false;
+
+    await appData.contract.events.AirlineFunded((err, res) => {
+        eventEmitted = true
+    });
+
+    await app.fundAirline(defaultAirline, {from : config.owner, value: web3.utils.toWei('10', 'ether')});
+
+    let isFunded = await appData.isAirlineFunded(defaultAirline);
+
+    let appDataBalance = await web3.eth.getBalance(appData.address);
+    let minBalanceAfterFunding = await  web3.utils.toWei('10', 'ether');
+
+    assert.equal(isFunded, true, 'Airline was not funded.');
+    assert.equal(eventEmitted, true, "AirlineFunded was not emmited.");
+    assert.equal(appDataBalance >= minBalanceAfterFunding, true, "Contract has the funded amount")
+});
+
+it('Funded (airline) can register another airline', async () => {
+
+    let eventAirlineRegisteredEmitted = false;
+
+    await appData.contract.events.AirlineRegistered((err, res) => {
+        eventAirlineRegisteredEmitted = true
+    });
+
+    await app.registerAirline(config.firstAirline, 'Yellow Bird', {from : config.owner});
+
+    let eventAirlineFundedEmitted = false;
+
+    await appData.contract.events.AirlineFunded((err, res) => {
+        eventAirlineFundedEmitted = true
+    });
+
+    await app.fundAirline(config.firstAirline, {from : config.firstAirline, value: web3.utils.toWei('10', 'ether')});
+
+    let isFunded = await appData.isAirlineFunded(config.firstAirline);
+
+    assert.equal(eventAirlineRegisteredEmitted, true, "AirlineRegistered was not emmited.");
+    assert.equal(eventAirlineFundedEmitted, true, "AirlineFunded was not emmited.");
+    assert.equal(isFunded, true, 'Airline was not funded.');
+});
+
+it('(airline) can register a flight', async () => {
+
+    let eventEmitted = false;
+
+    await appData.contract.events.FlightRegistered((err, res) => {
+        eventEmitted = true
+    });
+
+    await app.registerFlight(FLIGHT, TIMESTAMP, 'NYC', 'AMS', {from : config.firstAirline});
+
+    let isFlightRegistered = await appData.isFlightRegistered(config.firstAirline, FLIGHT, TIMESTAMP);
+
+    assert.equal(eventEmitted, true, "FlightRegistered was not emmited.");
+    assert.equal(isFlightRegistered, true, "Flight was not registered.");
+});
+
 it('Customer should be able to buy insurance', async () => {
 
     let eventEmitted = false;
@@ -134,7 +201,7 @@ it('Customer should be able to buy insurance', async () => {
 
     let contractBalance = await appData.getBalance.call();
 
-    assert.equal(contractBalance, insuranceAmount, "Amount collected does not match.");
+    assert.equal(contractBalance >= insuranceAmount, true, "Amount collected does not match.");
     assert.equal(eventEmitted, true, "InsurancePurchased was not emmited.");
 });
 
@@ -179,29 +246,6 @@ it('Customer should be able to withdraw insurance payout', async () => {
     assert.equal(eventAccountWithdrawnEmitted, true, "AccountWithdrawn was not emitted.");
     assert.equal(currentCustomerBalance > customerBalanceAfterBuy, true, "Balance is not greater than after purchase." )
 });
-
-it('(airline) can be funded', async () => {
-
-    let defaultAirline = config.owner;
-
-    let eventEmitted = false;
-
-    await appData.contract.events.AirlineFunded((err, res) => {
-        eventEmitted = true
-    });
-
-    await appData.fundAirline(defaultAirline, {from : config.owner, value: web3.utils.toWei('10', 'ether')});
-
-    let isFunded = await appData.isAirlineFunded(defaultAirline);
-
-    let appDataBalance = await web3.eth.getBalance(appData.address);
-    let minBalanceAfterFunding = await  web3.utils.toWei('10', 'ether');
-
-    assert.equal(isFunded, true, 'Airline was not funded.');
-    assert.equal(eventEmitted, true, "AirlineFunded was not emmited.");
-    assert.equal(appDataBalance >= minBalanceAfterFunding, true, "Contract has the funded amount")
-});
-
 
 it('(airline) can register a flight', async () => {
 
